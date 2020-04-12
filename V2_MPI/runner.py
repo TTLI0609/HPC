@@ -17,10 +17,11 @@ params['proof'] = 0x65dec1542f679f51
 
 # Paramètres du calcul (à adapter)
 params['matrix'] = "bcsstk13"
-params['users'] = ["Tingting L","Sonia M"]
+params['users'] = ["Charles Bouillaguet", "Lilia Ziane Khodja"]
 
 # Description du code exécuté
-params['software'] = """Paralélisation OpenMP"""
+params['software'] = """Code séquentiel fourni.
+Pas d'améliorations apportées."""
 
 # Description du matériel utilisé pour l'exécution
 params['nodes'] = 4   # nombre de noeuds
@@ -34,9 +35,8 @@ Machines de bureau DELL équipés de CPU Intel i3 à 2 coeurs, 3Ghz, et 4Go de R
 #   {cores}  sera remplacé par la valeur ci-dessus.
 #   {seed}   sera remplacé par la valeur fournie par le serveur.
 #   On peut ajouter toutes les options qu'on veut, utiliser mpiexec, etc.
-
-#command_line = "./cg --matrix {matrix}.mtx --seed {seed}"
-command_line = "zcat /Infos/lmd/2019/master/ue/MU4IN903-2020fev/{matrix}.mtx.gz | ./cg --seed {seed}"
+command_line = "./cg --matrix {matrix}.mtx --seed {seed}"
+#command_line = "zcat matrices/{matrix}.mtx.gz | ./cg --seed {seed}"
 #command_line = "mpiexec --n {cores} --hostfile nodes.txt --display-map ./cg --matrix {matrix}.mtx --seed {seed}"
 #command_line = "mpiexec --n {nodes} -hostfile nodes.txt --map-by ppr:1:node ./cg --matrix {matrix}.mtx --seed {seed}"
 

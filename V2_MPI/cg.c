@@ -27,6 +27,7 @@
 #include <math.h>
 #include <getopt.h>
 #include <sys/time.h>
+#include <mpi.h>
 
 #include "mmio.h"
 
@@ -194,8 +195,7 @@ void extract_diagonal(const struct csr_matrix_t *A, double *d)
 	int *Ap = A->Ap;
 	int *Aj = A->Aj;
 	double *Ax = A->Ax;
-
-	#pragma omp parallel for schedule(auto)
+    
 	for (int i = 0; i < n; i++) {
 		d[i] = 0.0;
 		for (int u = Ap[i]; u < Ap[i + 1]; u++)
@@ -211,8 +211,6 @@ void sp_gemv(const struct csr_matrix_t *A, const double *x, double *y)
 	int *Ap = A->Ap;
 	int *Aj = A->Aj;
 	double *Ax = A->Ax;
-
-	#pragma omp parallel for schedule(auto)
 	for (int i = 0; i < n; i++) {
 		y[i] = 0;
 		for (int u = Ap[i]; u < Ap[i + 1]; u++) {
@@ -229,8 +227,6 @@ void sp_gemv(const struct csr_matrix_t *A, const double *x, double *y)
 double dot(const int n, const double *x, const double *y)
 {
 	double sum = 0.0;
-
-	#pragma omp parallel for reduction(+:sum)
 	for (int i = 0; i < n; i++)
 		sum += x[i] * y[i];
 	return sum;
@@ -269,45 +265,35 @@ void cg_solve(const struct csr_matrix_t *A, const double *b, double *x, const do
 	 * preconditionning.
 	 */
 
-	int i;
-	#pragma omp parallel for schedule(auto)
-	for (i = 0; i < n; i++){
-		x[i] = 0.0;		/* We use x == 0 --- this avoids the first matrix-vector product. */
-		r[i] = b[i];		// r <-- b - Ax == b
-		z[i] = r[i] / d[i];     // z <-- M^(-1).r
-		p[i] = z[i];		// p <-- z
-	}
+	/* We use x == 0 --- this avoids the first matrix-vector product. */
+	for (int i = 0; i < n; i++)
+		x[i] = 0.0;
+	for (int i = 0; i < n; i++)	// r <-- b - Ax == b
+		r[i] = b[i];
+	for (int i = 0; i < n; i++)	// z <-- M^(-1).r
+		z[i] = r[i] / d[i];
+	for (int i = 0; i < n; i++)	// p <-- z
+		p[i] = z[i];
 
 	double rz = dot(n, r, z);
 	double start = wtime();
 	double last_display = start;
 	int iter = 0;
-
-
 	while (norm(n, r) > epsilon) {
-
 		/* loop invariant : rz = dot(r, z) */
 		double old_rz = rz;
 		sp_gemv(A, p, q);	/* q <-- A.p */
 		double alpha = old_rz / dot(n, p, q);
-
-
-		#pragma omp parallel for schedule(auto)
-		for (i = 0; i < n; i++)	{
-			x[i] += alpha * p[i];  // x <-- x + alpha*p
-			r[i] -= alpha * q[i];  // r <-- r - alpha*q
-			z[i] = r[i] / d[i];    // z <-- M^(-1).r
-		}
-
-
+		for (int i = 0; i < n; i++)	// x <-- x + alpha*p
+			x[i] += alpha * p[i];
+		for (int i = 0; i < n; i++)	// r <-- r - alpha*q
+			r[i] -= alpha * q[i];
+		for (int i = 0; i < n; i++)	// z <-- M^(-1).r
+			z[i] = r[i] / d[i];
 		rz = dot(n, r, z);	// restore invariant
 		double beta = rz / old_rz;
-
-		#pragma omp parallel for  schedule(auto)
-		for (i = 0; i < n; i++)	// p <-- z + beta*p
+		for (int i = 0; i < n; i++)	// p <-- z + beta*p
 			p[i] = z[i] + beta * p[i];
-
-
 		iter++;
 		double t = wtime();
 		if (t - last_display > 0.5) {
@@ -319,7 +305,6 @@ void cg_solve(const struct csr_matrix_t *A, const double *b, double *x, const do
 			last_display = t;
 		}
 	}
-
 	fprintf(stderr, "\n     ---> Finished in %.1fs and %d iterations\n", wtime() - start, iter);
 }
 
@@ -365,6 +350,11 @@ int main(int argc, char **argv)
 			errx(1, "Unknown option");
 		}
 	}
+    
+    MPI_Init(&argc, &argv);
+    
+    
+    
 
 	/* Load the matrix */
 	FILE *f_mat = stdin;
@@ -390,19 +380,19 @@ int main(int argc, char **argv)
 		if (f_b == NULL)
 			err(1, "cannot open %s", rhs_filename);
 		fprintf(stderr, "[IO] Loading b from %s\n", rhs_filename);
-		
-		#pragma omp parallel for schedule(auto)
 		for (int i = 0; i < n; i++) {
 			if (1 != fscanf(f_b, "%lg\n", &b[i]))
 				errx(1, "parse error entry %d\n", i);
 		}
 		fclose(f_b);
 	} else {
-		#pragma omp parallel for schedule(auto)
 		for (int i = 0; i < n; i++)
 			b[i] = PRF(i, seed);
 	}
 
+    
+    
+    
 	/* solve Ax == b */
 	cg_solve(A, b, x, THRESHOLD, scratch);
 
@@ -410,8 +400,6 @@ int main(int argc, char **argv)
 	if (safety_check) {
 		double *y = scratch;
 		sp_gemv(A, x, y);	// y = Ax
-
-		#pragma omp parallel for schedule(auto)
 		for (int i = 0; i < n; i++)	// y = Ax - b
 			y[i] -= b[i];
 		fprintf(stderr, "[check] max error = %2.2e\n", norm(n, y));
@@ -427,5 +415,9 @@ int main(int argc, char **argv)
 	}
 	for (int i = 0; i < n; i++)
 		fprintf(f_x, "%a\n", x[i]);
+    
+    
+    MPI_Finalize();
+    
 	return EXIT_SUCCESS;
 }
