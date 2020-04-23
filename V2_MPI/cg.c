@@ -351,12 +351,15 @@ int main(int argc, char **argv)
 		}
 	}
     
-    MPI_Init(&argc, &argv);
-    
-    
-    
+ 	int my_rank, nb_proc;
+ 	MPI_Status status;
+ 	
+	MPI_Init(&argc, &argv);
+ 	MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);
+	MPI_Comm_size(MPI_COMM_WORLD, &nb_proc);
 
-	/* Load the matrix */
+    
+	/* Everyone load the entire matrix */
 	FILE *f_mat = stdin;
 	if (matrix_filename) {
 		f_mat = fopen(matrix_filename, "r");
@@ -365,14 +368,17 @@ int main(int argc, char **argv)
 	}
 	struct csr_matrix_t *A = load_mm(f_mat);
 
-	/* Allocate memory */
+
+	/* Allocate memory : tout les proc se charge d'un bloc de size_bloc lignes */
 	int n = A->n;
-	double *mem = malloc(7 * n * sizeof(double));
+	int size_bloc = n/nb_proc;    
+
+	double *mem = malloc(7 * size_bloc * sizeof(double));
 	if (mem == NULL)
 		err(1, "cannot allocate dense vectors");
 	double *x = mem;	/* solution vector */
-	double *b = mem + n;	/* right-hand side */
-	double *scratch = mem + 2 * n;	/* workspace for cg_solve() */
+	double *b = mem + size_bloc;	/* right-hand side */
+	double *scratch = mem + 2 * size_bloc;	/* workspace for cg_solve() */
 
 	/* Prepare right-hand size */
 	if (rhs_filename) {	/* load from file */
@@ -380,30 +386,45 @@ int main(int argc, char **argv)
 		if (f_b == NULL)
 			err(1, "cannot open %s", rhs_filename);
 		fprintf(stderr, "[IO] Loading b from %s\n", rhs_filename);
-		for (int i = 0; i < n; i++) {
-			if (1 != fscanf(f_b, "%lg\n", &b[i]))
-				errx(1, "parse error entry %d\n", i);
+		for (int i = 0; i < size_bloc; i++) {
+			if (1 != fscanf(f_b, "%lg\n", &b[ i * nb_proc]))
+				errx(1, "parse error entry %d\n", i*nb_proc);
 		}
 		fclose(f_b);
 	} else {
-		for (int i = 0; i < n; i++)
-			b[i] = PRF(i, seed);
+		for (int i = 0; i < size_bloc; i++)
+			b[i] = PRF(i*nb_proc, seed);
 	}
 
-    
-    
-    
-	/* solve Ax == b */
-	cg_solve(A, b, x, THRESHOLD, scratch);
 
-	/* Check result */
-	if (safety_check) {
-		double *y = scratch;
-		sp_gemv(A, x, y);	// y = Ax
-		for (int i = 0; i < n; i++)	// y = Ax - b
-			y[i] -= b[i];
-		fprintf(stderr, "[check] max error = %2.2e\n", norm(n, y));
+	/* le proc 0 va recuperer à la fin tout les resulats */ 
+       if (my_rank == 0){
+		double * x_total = malloc(7 * n * sizeof(double)); 
+        }
+
+
+	if (my_rank != 0){
+	
+		/* comment on fait pour partager A en bloc */    		
+
+		/* solve Ax == b */
+		cg_solve(A, b, x, THRESHOLD, scratch);
+
+		/* Check result */
+		if (safety_check) {
+			double *y = scratch;
+			sp_gemv(A, x, y);	// y = Ax
+			for (int i = 0; i < n; i++)	// y = Ax - b
+				y[i] -= b[i];
+			fprintf(stderr, "[check] max error = %2.2e\n", norm(n, y));
+		}
+
+
+
+
+
 	}
+
 
 	/* Dump the solution vector */
 	FILE *f_x = stdout;
@@ -417,6 +438,8 @@ int main(int argc, char **argv)
 		fprintf(f_x, "%a\n", x[i]);
     
     
+	
+
     MPI_Finalize();
     
 	return EXIT_SUCCESS;

@@ -274,11 +274,10 @@ void cg_solve(const struct csr_matrix_t *A, const double *b, double *x, const do
 	for (i = 0; i < n; i++){
 		x[i] = 0.0;		/* We use x == 0 --- this avoids the first matrix-vector product. */
 		r[i] = b[i];		// r <-- b - Ax == b
-		z[i] = r[i] / d[i];     // z <-- M^(-1).r
-		p[i] = z[i];		// p <-- z
+		p[i] = r[i] / d[i];		// p <--z =  M^(-1).r
 	}
 
-	double rz = dot(n, r, z);
+	double rz = dot(n, r, p);
 	double start = wtime();
 	double last_display = start;
 	int iter = 0;
