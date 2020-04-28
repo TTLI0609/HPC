@@ -350,16 +350,18 @@ int main(int argc, char **argv)
 			errx(1, "Unknown option");
 		}
 	}
+
+
     
  	int my_rank, nb_proc;
- 	MPI_Status status;
+ 	int i;
  	
 	MPI_Init(&argc, &argv);
  	MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);
 	MPI_Comm_size(MPI_COMM_WORLD, &nb_proc);
 
     
-	/* Everyone load the entire matrix */
+	/* Everyone load the entire matrix A */
 	FILE *f_mat = stdin;
 	if (matrix_filename) {
 		f_mat = fopen(matrix_filename, "r");
@@ -371,14 +373,14 @@ int main(int argc, char **argv)
 
 	/* Allocate memory : tout les proc se charge d'un bloc de size_bloc lignes */
 	int n = A->n;
-	int size_bloc = n/nb_proc;    
+	int size_bloc = n / nb_proc; // nb_proc est un multiple du nb de ligne (n)
 
-	double *mem = malloc(7 * size_bloc * sizeof(double));
-	if (mem == NULL)
+	double *mem_local = malloc(7 * size_bloc * sizeof(double));
+	if (mem_local == NULL)
 		err(1, "cannot allocate dense vectors");
-	double *x = mem;	/* solution vector */
-	double *b = mem + size_bloc;	/* right-hand side */
-	double *scratch = mem + 2 * size_bloc;	/* workspace for cg_solve() */
+	double *x_local = mem_local;	/* solution vector */
+	double *b_local = mem_local + size_bloc;	/* right-hand side */
+	double *scratch_local = mem_local + 2 * size_bloc;	/* workspace for cg_solve() */
 
 	/* Prepare right-hand size */
 	if (rhs_filename) {	/* load from file */
@@ -387,43 +389,80 @@ int main(int argc, char **argv)
 			err(1, "cannot open %s", rhs_filename);
 		fprintf(stderr, "[IO] Loading b from %s\n", rhs_filename);
 		for (int i = 0; i < size_bloc; i++) {
-			if (1 != fscanf(f_b, "%lg\n", &b[ i * nb_proc]))
+			if (1 != fscanf(f_b, "%lg\n", &b_local[ i * nb_proc]))
 				errx(1, "parse error entry %d\n", i*nb_proc);
 		}
 		fclose(f_b);
 	} else {
 		for (int i = 0; i < size_bloc; i++)
-			b[i] = PRF(i*nb_proc, seed);
+			b_local[i] = PRF(i+my_rank, seed);
 	}
 
-
-	/* le proc 0 va recuperer à la fin tout les resulats */ 
-       if (my_rank == 0){
-		double * x_total = malloc(7 * n * sizeof(double)); 
-        }
+	double * x_total = malloc(7 * n * sizeof(double));
+	//double *scratch_total =  malloc(7 * n * sizeof(double)) + 2 * n;
 
 
-	if (my_rank != 0){
+
+	/*Construire A_local */
+	struct csr_matrix_t *A_local = malloc(sizeof(*A_local));
+	if (A_local == NULL)
+		err(1, "malloc failed");
+
+	int tab_nb_rows[nb_proc];  // nb de ligne pour chaque proc
+	for (i=0;i<nb_proc;i++){
+		tab_nb_rows[i] = size_bloc;
+	}
+	int tab_offsets[nb_proc];  // offset pour calculer les lignes
+	for (i=0;i<=nb_proc;i++){
+		tab_offsets[i] = size_bloc*i;
+	}
+
+	A_local->n = size_bloc;
+
+	int *Ap = malloc((size_bloc + 1) * sizeof(*Ap));
+	for (i=0;i<size_bloc;i++){  //my_rank*size_bloc + 0  à my_rank*size_bloc+size_bloc de A->Ap
+		Ap[i] = A->Ap[(my_rank*size_bloc) +i ];
+	}
+	A_local->Ap = Ap;
+
+	A_local->nz = Ap[tab_offsets[my_rank+1]]- Ap[tab_offsets[my_rank]] ;
+
+
+	int *Aj = malloc((size_bloc + 1) * sizeof(*Aj));
+	for (i=Ap[tab_offsets[my_rank]];i<Ap[tab_offsets[my_rank+1]];i++){
+		Aj[i] = A->Aj[i];
+	}
+	A_local->Aj = Aj;
+
+	double *Ax = malloc((size_bloc + 1) * sizeof(*Ax));
+	for (i=Ap[tab_offsets[my_rank]];i<Ap[tab_offsets[my_rank+1]];i++){
+		Ax[i] = A->Ax[Ap[i]];
+	}
+	A_local->Ax = Ax;
+
+
+
+	/* solve A_local * x_local == b_local */
+	cg_solve(A_local, b_local, x_local, THRESHOLD, scratch_local);
+
 	
-		/* comment on fait pour partager A en bloc */    		
+	// tout le monde envoi resutat a P0
+	// P0 construit x_total
+	MPI_Gather(x_local , 7*size_bloc, MPI_DOUBLE, &x_total[my_rank*(7*size_bloc)] , 7*size_bloc, MPI_DOUBLE,0,  MPI_COMM_WORLD);
 
-		/* solve Ax == b */
-		cg_solve(A, b, x, THRESHOLD, scratch);
+/*
+	if (my_rank == 0){
 
-		/* Check result */
+		// Check result
 		if (safety_check) {
 			double *y = scratch;
-			sp_gemv(A, x, y);	// y = Ax
-			for (int i = 0; i < n; i++)	// y = Ax - b
+			sp_gemv(A, x_total, y);	// y = Ax
+			for (int i = 0; i < size_bloc; i++)	// y = Ax - b
 				y[i] -= b[i];
 			fprintf(stderr, "[check] max error = %2.2e\n", norm(n, y));
 		}
-
-
-
-
-
 	}
+*/
 
 
 	/* Dump the solution vector */
@@ -435,7 +474,7 @@ int main(int argc, char **argv)
 		fprintf(stderr, "[IO] writing solution to %s\n", solution_filename);
 	}
 	for (int i = 0; i < n; i++)
-		fprintf(f_x, "%a\n", x[i]);
+		fprintf(f_x, "%a\n", x_local[i]);
     
     
 	
