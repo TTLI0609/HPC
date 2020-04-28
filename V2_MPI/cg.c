@@ -1,4 +1,4 @@
-/* 
+/*
  * Sequential implementation of the Conjugate Gradient Method.
  *
  * Authors : Lilia Ziane Khodja & Charles Bouillaguet
@@ -8,8 +8,8 @@
  * CHANGE LOG:
  *    v1.01 : fix a minor printing bug in load_mm (incorrect CSR matrix size)
  *    v1.02 : use https instead of http in "PRO-TIP"
- *  
- * USAGE: 
+ *
+ * USAGE:
  * 	$ ./cg --matrix bcsstk13.mtx                # loading matrix from file
  *      $ ./cg --matrix bcsstk13.mtx > /dev/null    # ignoring solution
  *	$ ./cg < bcsstk13.mtx > /dev/null           # loading matrix from stdin
@@ -110,7 +110,7 @@ struct csr_matrix_t *load_mm(FILE * f)
 		/*
 		 * Uncomment this to check input (but it slows reading)
 		 * if (i < 1 || i > n || j < 1 || j > i)
-		 *	errx(2, "invalid entry %d : %d %d\n", u, i, j); 
+		 *	errx(2, "invalid entry %d : %d %d\n", u, i, j);
 		 */
 		Tx[u] = x;
 	}
@@ -195,7 +195,7 @@ void extract_diagonal(const struct csr_matrix_t *A, double *d)
 	int *Ap = A->Ap;
 	int *Aj = A->Aj;
 	double *Ax = A->Ax;
-    
+
 	for (int i = 0; i < n; i++) {
 		d[i] = 0.0;
 		for (int u = Ap[i]; u < Ap[i + 1]; u++)
@@ -259,7 +259,7 @@ void cg_solve(const struct csr_matrix_t *A, const double *b, double *x, const do
 	/* Isolate diagonal */
 	extract_diagonal(A, d);
 
-	/* 
+	/*
 	 * This function follows closely the pseudo-code given in the (english)
 	 * Wikipedia page "Conjugate gradient method". This is the version with
 	 * preconditionning.
@@ -352,15 +352,15 @@ int main(int argc, char **argv)
 	}
 
 
-    
+
  	int my_rank, nb_proc;
  	int i;
- 	
+
 	MPI_Init(&argc, &argv);
  	MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);
 	MPI_Comm_size(MPI_COMM_WORLD, &nb_proc);
 
-    
+
 	/* Everyone load the entire matrix A */
 	FILE *f_mat = stdin;
 	if (matrix_filename) {
@@ -383,20 +383,20 @@ int main(int argc, char **argv)
 	double *scratch_local = mem_local + 2 * size_bloc;	/* workspace for cg_solve() */
 
 	/* Prepare right-hand size */
-	if (rhs_filename) {	/* load from file */
+	if (rhs_filename) {	// load from file
 		FILE *f_b = fopen(rhs_filename, "r");
 		if (f_b == NULL)
 			err(1, "cannot open %s", rhs_filename);
 		fprintf(stderr, "[IO] Loading b from %s\n", rhs_filename);
 		for (int i = 0; i < size_bloc; i++) {
-			if (1 != fscanf(f_b, "%lg\n", &b_local[ i * nb_proc]))
-				errx(1, "parse error entry %d\n", i*nb_proc);
+			if (1 != fscanf(f_b, "%lg\n", &b_local[ i + (nb_proc*my_rank)]))
+				errx(1, "parse error entry %d\n", i + (nb_proc*my_rank));
 		}
 		fclose(f_b);
 	} else {
 		for (int i = 0; i < size_bloc; i++)
 			b_local[i] = PRF(i+my_rank, seed);
-	}
+	//}
 
 	double * x_total = malloc(7 * n * sizeof(double));
 	//double *scratch_total =  malloc(7 * n * sizeof(double)) + 2 * n;
@@ -409,43 +409,67 @@ int main(int argc, char **argv)
 		err(1, "malloc failed");
 
 	int tab_nb_rows[nb_proc];  // nb de ligne pour chaque proc
-	for (i=0;i<nb_proc;i++){
+	for (i=0;i<nb_proc -1 ;i++){
 		tab_nb_rows[i] = size_bloc;
 	}
+	tab_nb_rows[nb_proc -1]= n - (nb_proc - 1) *size_bloc;
+
 	int tab_offsets[nb_proc];  // offset pour calculer les lignes
-	for (i=0;i<=nb_proc;i++){
-		tab_offsets[i] = size_bloc*i;
+	tab_offsets[0] = 0;
+	for (i=1;i< nb_proc;i++){
+		tab_offsets[i] = tab_offsets[i -1] +tab_nb_rows[i - 1];
+
 	}
 
-	A_local->n = size_bloc;
+ if  (my_rank == nb_proc-1){
+	A_local->n = n - (nb_proc - 1) *size_bloc;
+ }
+ else{
+    A_local->n = size_bloc;
+ }
 
 	int *Ap = malloc((size_bloc + 1) * sizeof(*Ap));
-	for (i=0;i<size_bloc;i++){  //my_rank*size_bloc + 0  à my_rank*size_bloc+size_bloc de A->Ap
+	for (i=0;i<=tab_nb_rows[my_rank] ;i++){  //my_rank*size_bloc + 0  à my_rank*size_bloc+size_bloc de A->Ap
 		Ap[i] = A->Ap[(my_rank*size_bloc) +i ];
 	}
 	A_local->Ap = Ap;
 
-	A_local->nz = Ap[tab_offsets[my_rank+1]]- Ap[tab_offsets[my_rank]] ;
+	//A_local->nz = Ap[tab_offsets[my_rank+1]]- Ap[tab_offsets[my_rank]] ;
 
+    int *Aj = malloc((size_bloc + 1) * sizeof(*Aj));
 
-	int *Aj = malloc((size_bloc + 1) * sizeof(*Aj));
-	for (i=Ap[tab_offsets[my_rank]];i<Ap[tab_offsets[my_rank+1]];i++){
-		Aj[i] = A->Aj[i];
+	if  (my_rank == nb_proc-1){
+	   for (i=A->Ap[tab_offsets[my_rank]];i< A->Ap[n];i++){
+            Aj[i] = A->Aj[i];
+        }
+	}else{
+        for (i=A->Ap[tab_offsets[my_rank]];i< A->Ap[tab_offsets[my_rank+1]];i++){
+            Aj[i] = A->Aj[i];
+        }
 	}
+
 	A_local->Aj = Aj;
 
 	double *Ax = malloc((size_bloc + 1) * sizeof(*Ax));
-	for (i=Ap[tab_offsets[my_rank]];i<Ap[tab_offsets[my_rank+1]];i++){
-		Ax[i] = A->Ax[Ap[i]];
+	if  (my_rank == nb_proc-1){
+        for (i=Ap[tab_offsets[my_rank]];i< A->Ap[n];i++){
+        	Ax[i] = A->Ax[Ap[i]];
+        }
+	}else{
+	     for (i=A->Ap[tab_offsets[my_rank]];i< A->Ap[tab_offsets[my_rank+1]];i++){
+            Ax[i] = A->Ax[i];
+        }
 	}
+
 	A_local->Ax = Ax;
+
 
 
 
 	/* solve A_local * x_local == b_local */
 	cg_solve(A_local, b_local, x_local, THRESHOLD, scratch_local);
 
-	
+
 	// tout le monde envoi resutat a P0
 	// P0 construit x_total
 	MPI_Gather(x_local , 7*size_bloc, MPI_DOUBLE, &x_total[my_rank*(7*size_bloc)] , 7*size_bloc, MPI_DOUBLE,0,  MPI_COMM_WORLD);
@@ -475,11 +499,9 @@ int main(int argc, char **argv)
 	}
 	for (int i = 0; i < n; i++)
 		fprintf(f_x, "%a\n", x_local[i]);
-    
-    
-	
+
+
+
 
     MPI_Finalize();
-    
-	return EXIT_SUCCESS;
 }
