@@ -2,7 +2,7 @@
 CC = $$HOME/opt/usr/local/bin/mpicc
 
 # Add your choice of flags
-CFLAGS =-O3 -Wall -Wextra -g
+CFLAGS =-O3 -Wall -Wextra -g 
 LDLIBS = -lm
 
 all : cg

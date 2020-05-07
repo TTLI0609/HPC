@@ -16,16 +16,18 @@ params['version'] = 3
 params['proof'] = 0x65dec1542f679f51
 
 # Paramètres du calcul (à adapter)
-params['matrix'] = "cfd2"
-params['users'] = ["Sonia M", "Tingting L"]
+params['matrix'] = "bcsstk13"
+params['users'] = ["Charles Bouillaguet", "Lilia Ziane Khodja"]
 
 # Description du code exécuté
-params['software'] = """parallelisation MPI"""
+params['software'] = """Code séquentiel fourni.
+Pas d'améliorations apportées."""
 
 # Description du matériel utilisé pour l'exécution
 params['nodes'] = 4   # nombre de noeuds
-params['cores'] = 4* params['nodes']   # nombre total de coeurs
-params['hardware'] = """  ppti_14-305"""
+params['cores'] = 8   # nombre total de coeurs
+params['hardware'] = """4 PCs de la Salle 327 (Esclangon).
+Machines de bureau DELL équipés de CPU Intel i3 à 2 coeurs, 3Ghz, et 4Go de RAM."""
 
 # Comment exécuter le solveur :
 #   {matrix} sera remplacé par la valeur ci-dessus.
@@ -35,8 +37,8 @@ params['hardware'] = """  ppti_14-305"""
 #   On peut ajouter toutes les options qu'on veut, utiliser mpiexec, etc.
 command_line = "./cg --matrix {matrix}.mtx --seed {seed}"
 #command_line = "zcat matrices/{matrix}.mtx.gz | ./cg --seed {seed}"
-command_line = "mpiexec --n {nodes} --hostfile hostfile --display-map ./cg --matrix {matrix}.mtx --seed {seed}"
-#command_line = "mpiexec --n {nodes} -hostfile hostfile --map-by ppr:1:node ./cg --matrix {matrix}.mtx --seed {seed}"
+#command_line = "mpiexec --n {cores} --hostfile nodes.txt --display-map ./cg --matrix {matrix}.mtx --seed {seed}"
+#command_line = "mpiexec --n {nodes} -hostfile nodes.txt --map-by ppr:1:node ./cg --matrix {matrix}.mtx --seed {seed}"
 
 ######################### Main Program ###########################
 
