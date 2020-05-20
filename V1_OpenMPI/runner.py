@@ -25,8 +25,7 @@ params['software'] = """Paralélisation OpenMP"""
 # Description du matériel utilisé pour l'exécution
 params['nodes'] = 4   # nombre de noeuds
 params['cores'] = 8   # nombre total de coeurs
-params['hardware'] = """4 PCs de la Salle 327 (Esclangon).
-Machines de bureau DELL équipés de CPU Intel i3 à 2 coeurs, 3Ghz, et 4Go de RAM."""
+params['hardware'] = """ ppti-14-305-01 """
 
 # Comment exécuter le solveur :
 #   {matrix} sera remplacé par la valeur ci-dessus.

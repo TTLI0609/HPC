@@ -1,4 +1,4 @@
-/*
+/* 
  * Sequential implementation of the Conjugate Gradient Method.
  *
  * Authors : Lilia Ziane Khodja & Charles Bouillaguet
@@ -8,8 +8,8 @@
  * CHANGE LOG:
  *    v1.01 : fix a minor printing bug in load_mm (incorrect CSR matrix size)
  *    v1.02 : use https instead of http in "PRO-TIP"
- *
- * USAGE:
+ *  
+ * USAGE: 
  * 	$ ./cg --matrix bcsstk13.mtx                # loading matrix from file
  *      $ ./cg --matrix bcsstk13.mtx > /dev/null    # ignoring solution
  *	$ ./cg < bcsstk13.mtx > /dev/null           # loading matrix from stdin
@@ -21,14 +21,12 @@
  *      # downloading and uncompressing the matrix on the fly
  *	$ curl --silent https://hpc.fil.cool/matrix/bcsstk13.mtx.gz | zcat | ./cg
  */
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <err.h>
 #include <math.h>
 #include <getopt.h>
 #include <sys/time.h>
-#include <mpi.h>
 
 #include "mmio.h"
 
@@ -111,7 +109,7 @@ struct csr_matrix_t *load_mm(FILE * f)
 		/*
 		 * Uncomment this to check input (but it slows reading)
 		 * if (i < 1 || i > n || j < 1 || j > i)
-		 *	errx(2, "invalid entry %d : %d %d\n", u, i, j);
+		 *	errx(2, "invalid entry %d : %d %d\n", u, i, j); 
 		 */
 		Tx[u] = x;
 	}
@@ -196,6 +194,8 @@ void extract_diagonal(const struct csr_matrix_t *A, double *d)
 	int *Ap = A->Ap;
 	int *Aj = A->Aj;
 	double *Ax = A->Ax;
+
+	#pragma omp parallel for
 	for (int i = 0; i < n; i++) {
 		d[i] = 0.0;
 		for (int u = Ap[i]; u < Ap[i + 1]; u++)
@@ -204,16 +204,16 @@ void extract_diagonal(const struct csr_matrix_t *A, double *d)
 	}
 }
 
-
-
 /* Matrix-vector product (with A in CSR format) : y = Ax */
-void sp_gemv(const struct csr_matrix_t *A, const double *x, double *y,int deb, int fin)
+void sp_gemv(const struct csr_matrix_t *A, const double *x, double *y)
 {
-	//int n = A->n;
+	int n = A->n;
 	int *Ap = A->Ap;
 	int *Aj = A->Aj;
 	double *Ax = A->Ax;
-	for (int i = deb; i < fin; i++) {
+
+	#pragma omp parallel for
+	for (int i = 0; i < n; i++) {
 		y[i] = 0;
 		for (int u = Ap[i]; u < Ap[i + 1]; u++) {
 			int j = Aj[u];
@@ -226,10 +226,12 @@ void sp_gemv(const struct csr_matrix_t *A, const double *x, double *y,int deb, i
 /*************************** Vector operations ********************************/
 
 /* dot product */
-double dot(const double *x, const double *y,int deb,int fin)
+double dot(const int n, const double *x, const double *y)
 {
 	double sum = 0.0;
-	for (int i = deb; i < fin; i++)
+
+	#pragma omp parallel for reduction(+:sum)
+	for (int i = 0; i < n; i++)
 		sum += x[i] * y[i];
 	return sum;
 }
@@ -237,123 +239,87 @@ double dot(const double *x, const double *y,int deb,int fin)
 /* euclidean norm (a.k.a 2-norm) */
 double norm(const int n, const double *x)
 {
-	return sqrt(dot(x, x,0,n));
+	return sqrt(dot(n, x, x));
 }
 
 /*********************** conjugate gradient algorithm *************************/
 
 /* Solve Ax == b (the solution is written in x). Scratch must be preallocated of size 6n */
-void cg_solve(const struct csr_matrix_t *A, const double *b, double *x, const double epsilon, double *scratch, int my_rank, int nb_proc)
+void cg_solve(const struct csr_matrix_t *A, const double *b, double *x, const double epsilon, double *scratch)
 {
-
+	int i;
 	int n = A->n;
 	int nz = A->nz;
-	int j = ( n/nb_proc) +1;
-	int new_size=j*nb_proc;
-	int deb = my_rank*j;
-	int fin = (my_rank+1)*j;
 
-	/*Affichage par P0*/
-	if(my_rank == 0){
-		fprintf(stderr, "[CG] Starting iterative solver\n");
-		fprintf(stderr, "     ---> Working set : %.1fMbyte\n", 1e-6 * (12.0 * nz + 52.0 * n));
-		fprintf(stderr, "     ---> Per iteration: %.2g FLOP in sp_gemv() and %.2g FLOP in the rest\n", 2. * nz, 12. * n);
-	}
+	fprintf(stderr, "[CG] Starting iterative solver\n");
+	fprintf(stderr, "     ---> Working set : %.1fMbyte\n", 1e-6 * (12.0 * nz + 52.0 * n));
+	fprintf(stderr, "     ---> Per iteration: %.2g FLOP in sp_gemv() and %.2g FLOP in the rest\n", 2. * nz, 12. * n);
 
 	double *r = scratch;	        // residue
 	double *z = scratch + n;	// preconditioned-residue
-	double *p = scratch + 2 * new_size;	// search direction
-	double *q = scratch + 3 * new_size;	// q == Ap
-	double *d = scratch + 4 * new_size;	// diagonal entries of A (Jacobi preconditioning)
-
-	double erreur;
+	double *p = scratch + 2 * n;	// search direction
+	double *q = scratch + 3 * n;	// q == Ap
+	double *d = scratch + 4 * n;	// diagonal entries of A (Jacobi preconditioning)
 
 	/* Isolate diagonal */
-	for (int i =n-1 ; i < new_size; i++)  // pour les divisions
-		d[i]=1;
 	extract_diagonal(A, d);
 
-	/*
+	/* 
 	 * This function follows closely the pseudo-code given in the (english)
 	 * Wikipedia page "Conjugate gradient method". This is the version with
 	 * preconditionning.
 	 */
 
-	/* We use x == 0 --- this avoids the first matrix-vector product. */
-	for (int i = deb; i < fin; i++){
-		x[i] = 0.0;
-		r[i] = b[i];  		 // r <-- b - Ax == b
-		z[i] = r[i] / d[i];  // z <-- M^(-1).r
-		p[i] = z[i];         // p <-- z
+	#pragma omp parallel for
+	for (i = 0; i < n; i++){
+		x[i] = 0.0;		/* We use x == 0 --- this avoids the first matrix-vector product. */
+		r[i] = b[i];		// r <-- b - Ax == b
+		p[i] = r[i] / d[i];		// p <--z =  M^(-1).r
 	}
 
-	double rz = dot( r, z,deb,fin);
-	MPI_Allreduce(MPI_IN_PLACE, &rz, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
-	// MPI_IN_PLACE -> donnée lu dans &rz
-
+	double rz = dot(n, r, p);
 	double start = wtime();
 	double last_display = start;
 	int iter = 0;
 
-	// erreur
-	erreur = dot( r, r,deb,fin);
-	MPI_Allreduce(MPI_IN_PLACE, &erreur, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
-	erreur=sqrt(erreur);
-
-	double prod_scalaire;
-	while (erreur > epsilon) {
-
-		MPI_Allgather(MPI_IN_PLACE, j, MPI_DOUBLE, p, j, MPI_DOUBLE, MPI_COMM_WORLD);
-		// MPI_IN_PLACE -> tableaux d'envoi est p (le meme que le recu)
+	while (norm(n, r) > epsilon) {
 
 		/* loop invariant : rz = dot(r, z) */
 		double old_rz = rz;
+		sp_gemv(A, p, q);	/* q <-- A.p */
+		double alpha = old_rz / dot(n, p, q);
 
-		sp_gemv(A, p, q,deb,fin);	/* q <-- A.p */
 
-		prod_scalaire=dot( p, q,deb,fin);
-		MPI_Allreduce(MPI_IN_PLACE, &prod_scalaire, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
-		double alpha = old_rz / prod_scalaire;
-
-		for (int i = deb; i < fin; i++){
-			x[i] += alpha * p[i];    // x <-- x + alpha*p
-			r[i] -= alpha * q[i];    // r <-- r - alpha*q
-			z[i] = r[i] / d[i];      // z <-- M^(-1).r
+		#pragma omp parallel for
+		for (i = 0; i < n; i++)	{
+			x[i] += alpha * p[i];  // x <-- x + alpha*p
+			r[i] -= alpha * q[i];  // r <-- r - alpha*q
+			z[i] = r[i] / d[i];    // z <-- M^(-1).r
 		}
 
-		rz = dot( r, z,deb,fin);	// restore invariant
-		MPI_Allreduce(MPI_IN_PLACE, &rz, 1, MPI_DOUBLE,MPI_SUM,MPI_COMM_WORLD);
+
+		rz = dot(n, r, z);	// restore invariant
 		double beta = rz / old_rz;
-		for (int i = deb; i < fin; i++){	// p <-- z + beta*p
-				p[i] = z[i] + beta * p[i];
-		}
+
+		#pragma omp parallel for
+		for (i = 0; i < n; i++)	// p <-- z + beta*p
+			p[i] = z[i] + beta * p[i];
+
+
 		iter++;
 		double t = wtime();
-
-		erreur = dot( r,r,deb,fin);
-		MPI_Allreduce(MPI_IN_PLACE, &erreur, 1,MPI_DOUBLE,MPI_SUM,MPI_COMM_WORLD);
-		erreur=sqrt(erreur);
-
-		if (t - last_display > 0.5 && my_rank == 0) {
-				/* verbosity */
-				double rate = iter / (t - start);	// iterations per s.
-				double GFLOPs = 1e-9 * rate * (2 * nz + 12 * n);
-				fprintf(stderr, "\r     ---> error : %2.2e, iter : %d (%.1f it/s, %.2f GFLOPs)", erreur, iter, rate, GFLOPs);
-				fflush(stdout);
-				last_display = t;
-			}
-
-		}
-		MPI_Allgather(MPI_IN_PLACE, j, MPI_DOUBLE, x ,j ,MPI_DOUBLE, MPI_COMM_WORLD);
-		if (my_rank == 0)
-		{
-			fprintf(stderr, "\n     ---> Finished in %.1fs and %d iterations\n", wtime() - start, iter);
+		if (t - last_display > 0.5) {
+			/* verbosity */
+			double rate = iter / (t - start);	// iterations per s.
+			double GFLOPs = 1e-9 * rate * (2 * nz + 12 * n);
+			fprintf(stderr, "\r     ---> error : %2.2e, iter : %d (%.1f it/s, %.2f GFLOPs)", norm(n, r), iter, rate, GFLOPs);
+			fflush(stdout);
+			last_display = t;
 		}
 	}
 
-
-
-
+	fprintf(stderr, "\n     ---> Finished in %.1fs and %d iterations\n", wtime() - start, iter);
+}
 
 /******************************* main program *********************************/
 
@@ -366,6 +332,7 @@ struct option longopts[6] = {
 	{"no-check", no_argument, NULL, 'c'},
 	{NULL, 0, NULL, 0}
 };
+
 int main(int argc, char **argv)
 {
 	/* Parse command-line options */
@@ -375,7 +342,6 @@ int main(int argc, char **argv)
 	char *solution_filename = NULL;
 	int safety_check = 1;
 	char ch;
-
 	while ((ch = getopt_long(argc, argv, "", longopts, NULL)) != -1) {
 		switch (ch) {
 		case 's':
@@ -398,109 +364,66 @@ int main(int argc, char **argv)
 		}
 	}
 
-
-
-
-	// MPI initialisation
-	int	my_rank, nb_proc;
-
-	MPI_Init(&argc,&argv);
-	MPI_Comm_rank(MPI_COMM_WORLD,&my_rank);
-	MPI_Comm_size(MPI_COMM_WORLD,&nb_proc);
-
-
 	/* Load the matrix */
 	FILE *f_mat = stdin;
-	if (matrix_filename && my_rank == 0) {
+	if (matrix_filename) {
 		f_mat = fopen(matrix_filename, "r");
 		if (f_mat == NULL)
 			err(1, "cannot matrix file %s", matrix_filename);
 	}
-	struct csr_matrix_t *A = malloc(sizeof(*A));
+	struct csr_matrix_t *A = load_mm(f_mat);
 
 	/* Allocate memory */
-	int n;
-	int nz;
-	if (my_rank == 0)
-	{
-		A = load_mm(f_mat);
-		n = A->n;
-		nz = A->nz;
-	}
-	MPI_Bcast(&n, 1 , MPI_INT, 0, MPI_COMM_WORLD);
-	MPI_Bcast(&nz, 1 , MPI_INT, 0, MPI_COMM_WORLD);
-
-	int j= (n/nb_proc)+1;
-	int new_size = j*nb_proc;
-
-	if(my_rank != 0){
-		A->Ap = malloc((n + 1) * sizeof(int));
-		A->Aj = malloc(nz * sizeof(int));
-		A->Ax = malloc(nz * sizeof(double));
-		A->n = n;
-		A->nz = nz;
-		/*if ((A->Aj == NULL) || (A->Ap == NULL) || (A->Ax == NULL))
-		{
-			err(1,"error allocating A - 2\n");
-		}*/
-	}
-	MPI_Bcast(&A->Ap[0], n+1, MPI_INT, 0, MPI_COMM_WORLD);
-	MPI_Bcast(&A->Aj[0], nz, MPI_INT, 0, MPI_COMM_WORLD);
-	MPI_Bcast(&A->Ax[0], nz, MPI_DOUBLE, 0, MPI_COMM_WORLD);
-
-
-	double *mem = malloc(7 * new_size * sizeof(double));
+	int n = A->n;
+	double *mem = malloc(7 * n * sizeof(double));
 	if (mem == NULL)
 		err(1, "cannot allocate dense vectors");
-
 	double *x = mem;	/* solution vector */
-	double *b = mem + new_size;
-	double *scratch = mem + new_size + n +1;	/* workspace for cg_solve() */
+	double *b = mem + n;	/* right-hand side */
+	double *scratch = mem + 2 * n;	/* workspace for cg_solve() */
 
-
-	/* Prepare right-hand size  -> b */
+	/* Prepare right-hand size */
 	if (rhs_filename) {	/* load from file */
 		FILE *f_b = fopen(rhs_filename, "r");
 		if (f_b == NULL)
 			err(1, "cannot open %s", rhs_filename);
 		fprintf(stderr, "[IO] Loading b from %s\n", rhs_filename);
+		
+		#pragma omp parallel for
 		for (int i = 0; i < n; i++) {
 			if (1 != fscanf(f_b, "%lg\n", &b[i]))
 				errx(1, "parse error entry %d\n", i);
 		}
 		fclose(f_b);
 	} else {
-		for (int i = 0; i < n; i++){
+		#pragma omp parallel for
+		for (int i = 0; i < n; i++)
 			b[i] = PRF(i, seed);
-		}
 	}
 
-
-	cg_solve(A, b, x, THRESHOLD, scratch, my_rank, nb_proc);
-
+	/* solve Ax == b */
+	cg_solve(A, b, x, THRESHOLD, scratch);
 
 	/* Check result */
-	if(my_rank == 0){
-		if (safety_check) {
-			double *y = scratch;
-			sp_gemv(A, x, y,0,n);	// y = Ax
-			for (int i = 0; i < n; i++)	// y = Ax - b
-				y[i] -= b[i];
-			fprintf(stderr, "[check] max error = %2.2e\n", norm(n, y));
-		}
+	if (safety_check) {
+		double *y = scratch;
+		sp_gemv(A, x, y);	// y = Ax
 
-		FILE *f_x = stdout;
-		if (solution_filename != NULL) {
-			f_x = fopen(solution_filename, "w");
-			if (f_x == NULL)
-				err(1, "cannot open solution file %s", solution_filename);
-			fprintf(stderr, "[IO] writing solution to %s\n", solution_filename);
-		}
-		for (int i = 0; i < n; i++)
-			fprintf(f_x, "%a\n", x[i]);
+		#pragma omp parallel for
+		for (int i = 0; i < n; i++)	// y = Ax - b
+			y[i] -= b[i];
+		fprintf(stderr, "[check] max error = %2.2e\n", norm(n, y));
 	}
 
-	MPI_Finalize();
-    //return EXIT_SUCCESS;
-
+	/* Dump the solution vector */
+	FILE *f_x = stdout;
+	if (solution_filename != NULL) {
+		f_x = fopen(solution_filename, "w");
+		if (f_x == NULL)
+			err(1, "cannot open solution file %s", solution_filename);
+		fprintf(stderr, "[IO] writing solution to %s\n", solution_filename);
+	}
+	for (int i = 0; i < n; i++)
+		fprintf(f_x, "%a\n", x[i]);
+	return EXIT_SUCCESS;
 }
