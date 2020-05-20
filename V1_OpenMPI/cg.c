@@ -195,7 +195,7 @@ void extract_diagonal(const struct csr_matrix_t *A, double *d)
 	int *Aj = A->Aj;
 	double *Ax = A->Ax;
 
-	#pragma omp parallel for schedule(auto)
+	#pragma omp parallel for
 	for (int i = 0; i < n; i++) {
 		d[i] = 0.0;
 		for (int u = Ap[i]; u < Ap[i + 1]; u++)
@@ -212,7 +212,7 @@ void sp_gemv(const struct csr_matrix_t *A, const double *x, double *y)
 	int *Aj = A->Aj;
 	double *Ax = A->Ax;
 
-	#pragma omp parallel for schedule(auto)
+	#pragma omp parallel for
 	for (int i = 0; i < n; i++) {
 		y[i] = 0;
 		for (int u = Ap[i]; u < Ap[i + 1]; u++) {
@@ -270,7 +270,7 @@ void cg_solve(const struct csr_matrix_t *A, const double *b, double *x, const do
 	 */
 
 	int i;
-	#pragma omp parallel for schedule(auto)
+	#pragma omp parallel for
 	for (i = 0; i < n; i++){
 		x[i] = 0.0;		/* We use x == 0 --- this avoids the first matrix-vector product. */
 		r[i] = b[i];		// r <-- b - Ax == b
@@ -291,7 +291,7 @@ void cg_solve(const struct csr_matrix_t *A, const double *b, double *x, const do
 		double alpha = old_rz / dot(n, p, q);
 
 
-		#pragma omp parallel for schedule(auto)
+		#pragma omp parallel for
 		for (i = 0; i < n; i++)	{
 			x[i] += alpha * p[i];  // x <-- x + alpha*p
 			r[i] -= alpha * q[i];  // r <-- r - alpha*q
@@ -302,7 +302,7 @@ void cg_solve(const struct csr_matrix_t *A, const double *b, double *x, const do
 		rz = dot(n, r, z);	// restore invariant
 		double beta = rz / old_rz;
 
-		#pragma omp parallel for  schedule(auto)
+		#pragma omp parallel for
 		for (i = 0; i < n; i++)	// p <-- z + beta*p
 			p[i] = z[i] + beta * p[i];
 
@@ -390,14 +390,14 @@ int main(int argc, char **argv)
 			err(1, "cannot open %s", rhs_filename);
 		fprintf(stderr, "[IO] Loading b from %s\n", rhs_filename);
 		
-		#pragma omp parallel for schedule(auto)
+		#pragma omp parallel for
 		for (int i = 0; i < n; i++) {
 			if (1 != fscanf(f_b, "%lg\n", &b[i]))
 				errx(1, "parse error entry %d\n", i);
 		}
 		fclose(f_b);
 	} else {
-		#pragma omp parallel for schedule(auto)
+		#pragma omp parallel for
 		for (int i = 0; i < n; i++)
 			b[i] = PRF(i, seed);
 	}
@@ -410,7 +410,7 @@ int main(int argc, char **argv)
 		double *y = scratch;
 		sp_gemv(A, x, y);	// y = Ax
 
-		#pragma omp parallel for schedule(auto)
+		#pragma omp parallel for
 		for (int i = 0; i < n; i++)	// y = Ax - b
 			y[i] -= b[i];
 		fprintf(stderr, "[check] max error = %2.2e\n", norm(n, y));

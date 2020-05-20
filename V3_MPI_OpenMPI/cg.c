@@ -197,7 +197,7 @@ void extract_diagonal(const struct csr_matrix_t *A, double *d)
 	int *Aj = A->Aj;
 	double *Ax = A->Ax;
 
-	#pragma omp parallel for schedule(auto)
+	#pragma omp parallel for
 	for (int i = 0; i < n; i++) {
 		d[i] = 0.0;
 		for (int u = Ap[i]; u < Ap[i + 1]; u++)
@@ -216,7 +216,7 @@ void sp_gemv(const struct csr_matrix_t *A, const double *x, double *y,int deb, i
 	int *Aj = A->Aj;
 	double *Ax = A->Ax;
 
-	#pragma omp parallel for schedule(auto)
+	#pragma omp parallel for
 	for (int i = deb; i < fin; i++) {
 		y[i] = 0;
 		for (int u = Ap[i]; u < Ap[i + 1]; u++) {
@@ -274,7 +274,7 @@ void cg_solve(const struct csr_matrix_t *A, const double *b, double *x, const do
 	double erreur;
 
 	/* Isolate diagonal */
-	#pragma omp parallel for schedule(auto)
+	#pragma omp parallel for
 	for (int i =n-1 ; i < new_size; i++)  // pour les divisions
 		d[i]=1;
 	extract_diagonal(A, d);
@@ -286,7 +286,7 @@ void cg_solve(const struct csr_matrix_t *A, const double *b, double *x, const do
 	 */
 
 	/* We use x == 0 --- this avoids the first matrix-vector product. */
-	#pragma omp parallel for schedule(auto)
+	#pragma omp parallel for
 	for (int i = deb; i < fin; i++){
 		x[i] = 0.0;
 		r[i] = b[i];  		 // r <-- b - Ax == b
@@ -320,7 +320,7 @@ void cg_solve(const struct csr_matrix_t *A, const double *b, double *x, const do
 		MPI_Allreduce(MPI_IN_PLACE, &prod_scalaire, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
 		double alpha = old_rz / prod_scalaire;
 
-		#pragma omp parallel for schedule(auto)
+		#pragma omp parallel for
 		for (int i = deb; i < fin; i++){
 			x[i] += alpha * p[i];    // x <-- x + alpha*p
 			r[i] -= alpha * q[i];    // r <-- r - alpha*q
@@ -331,7 +331,7 @@ void cg_solve(const struct csr_matrix_t *A, const double *b, double *x, const do
 		MPI_Allreduce(MPI_IN_PLACE, &rz, 1, MPI_DOUBLE,MPI_SUM,MPI_COMM_WORLD);
 		double beta = rz / old_rz;
 
-		#pragma omp parallel for schedule(auto)
+		#pragma omp parallel for
 		for (int i = deb; i < fin; i++){	// p <-- z + beta*p
 				p[i] = z[i] + beta * p[i];
 		}
