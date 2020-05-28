@@ -20,7 +20,7 @@ params['matrix'] = "cfd2"
 params['users'] = ["Sonia M", "Tingting L"]
 
 # Description du code exécuté
-params['software'] = """parallelisation MPI"""
+params['software'] = """parallelisation MPI+OpenMp"""
 
 # Description du matériel utilisé pour l'exécution
 params['nodes'] = 4   # nombre de noeuds
