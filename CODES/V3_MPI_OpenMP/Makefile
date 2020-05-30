@@ -1,8 +1,11 @@
 # your choice of compiler
-CC = gcc-9
+CC = mpicc
+
+#$$HOME/opt/usr/local/bin/mpicc
+
 
 # Add your choice of flags
-CFLAGS = -O3 -Wall -Wextra -g -fopenmp
+CFLAGS =-O3 -Wall -Wextra -g -fopenmp
 LDLIBS = -lm -fopenmp
 
 all : cg

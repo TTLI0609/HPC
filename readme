@@ -1,0 +1,5 @@
+Projet HPC : Résolution de systèmes linéaires creux par la méthode du gradient conjugué
+
+- Le code se trouve dans le répertoire CODES (on peut compiler les 3 versions avec make et make clean pour supprimer)
+
+- Les reçus générés sont dans le répertoire RECUS
